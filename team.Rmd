@@ -1,0 +1,162 @@
+---
+title: "DS 202 Lab 4"
+author: "Emma Smykalski"
+date: "3/19/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Part one: Cleaning data  
+```{r, echo=FALSE, cache=FALSE, results=FALSE, warning=FALSE, comment=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+
+defense <- read_excel('C:/Users/esmyk/oneDrive/DS 202/cyclonesFootball2020.xlsx', sheet='Defensive')
+offense <- read_excel('C:/Users/esmyk/oneDrive/DS 202/cyclonesFootball2020.xlsx', sheet='Offensive')
+biography <- read_excel('C:/Users/esmyk/oneDrive/DS 202/cyclonesFootball2020.xlsx', sheet='Biography')
+```
+```{r, warning = FALSE}
+defClean <- defense %>% mutate(across(Tackles_Solo:Pass_PB, as.numeric),Name = as.factor(Name), 
+                               Opponent_Opponent = as.factor(Opponent_Opponent))
+
+offClean <- offense %>% mutate(across(Receiving_REC:Passing_INT, as.numeric), Name = as.factor(Name), 
+                               Opponent_Opponent = as.factor(Opponent_Opponent))
+biography <- biography %>% mutate(Name = as.factor(Name), Weight = as.numeric(Weight))
+new <- biography %>% separate(Height, c('heightfeet','heightinches'), sep='-') %>%
+  mutate(heightfeet = as.numeric(heightfeet), heightinches = as.numeric(heightinches))
+new1 <- new %>% mutate('heightIN' = (heightfeet*12)+heightinches)
+bioClean <- new1 %>% select(-heightfeet, -heightinches)
+
+str(bioClean)
+str(defClean)
+str(offClean)
+
+```  
+
+## Part two: Tidying  
+### 1) 
+```{r}
+df <- offClean %>% pivot_longer(c(Receiving_REC:Passing_INT), names_to = 'stat', values_to = 'statnum')
+head(df)
+```  
+### 2)  
+From the histograms I made below I can see that a lot of the numbers for all the stats are towards the lower end with a high count in 0. This is probably because players play specific positions so there's only a few who contribute to each stat. Rushing_ATT and Rushing_YDS look like they have the most variability in their numbers.
+```{r}
+df %>% group_by(stat) %>%
+  ggplot(aes(x=statnum)) + geom_histogram(na.rm = TRUE) + facet_wrap(~stat, scales = 'free')
+```  
+
+### 3)  
+From the scatterplot below made up of the receiving yards of the ISU players against Oregon and Oklahoma I can see that ISU has better offense against Oklahoma because those data points were further up meaning more recieving yards.  
+```{r}
+df1 <- df %>% select(Name, Opponent_Opponent,stat, statnum) %>% filter(Opponent_Opponent == 'Oregon' |
+                                                   Opponent_Opponent == 'Oklahoma') %>%
+  filter(stat == 'Receiving_YDS')
+ggplot(df1, aes(x=statnum, y = statnum, color=Opponent_Opponent)) + geom_point() + xlab('Receiving Yards') + ylab('Receiving Yards')
+```
+
+### 4)
+```{r}
+bio <- bioClean %>% separate(Hometown, c('HTCity', 'HTState'), sep = ', ')
+head(bio)
+```
+
+### 5)  
+```{r}
+bio %>% group_by(HTState) %>%
+  summarize(Players_from_state =n()) %>%
+  arrange(desc(Players_from_state))
+```
+
+## Part three: Joining data frames  
+### 1)  
+From the histogram you can see how many players come from these states. I can see that on both teams a lot of players come from Florida, that's where the highest count of players on offense come from. On defense, the highest count of players come from Iowa.  
+```{r}
+biooff <- inner_join(bio, offClean, by = 'Name') %>% select(Name, Position, HTState) %>% mutate(Team = 'Offense')
+offState <- biooff %>% group_by(Name) %>%
+  summarize(HTState, Team) %>%
+  distinct()
+
+biodef <- inner_join(bio, defClean, by = 'Name') %>% select(Name, Position, HTState) %>%
+  mutate(Team = 'defense')
+defState <- biodef %>% group_by(Name) %>%
+  summarize(HTState, Team) %>%
+  distinct()
+
+states <- rbind(defState, offState)
+
+totalstates <- states %>% group_by(Team) %>% group_by(HTState) %>%
+  summarize(n=n()) %>%
+  arrange(desc(n))
+
+states <- states %>% mutate(HTState = as.factor(HTState)) 
+ggplot(states, aes(x=HTState)) + geom_bar() + scale_y_continuous(breaks=c(2,4,6,8,10,12,14)) + xlab('State') + ylab('Number of players from the state') + facet_wrap(~Team) + coord_flip()
+```  
+
+### 2)  
+I decided to show how Brock Purdy's performance relates to the performance of the team by finding the portion of the stats that he contributed to. I divided his stats by the total states off all the games in Offense. The high proportions show that his performance made up a lot of the team's performance. 
+```{r}
+purdy <- offClean[offClean$Name == 'Purdy, Brock', ]
+
+purdy <- purdy %>% select(Name, Opponent_Opponent, Rushing_ATT, Rushing_YDS, Rushing_TD, Passing_YDS, Passing_TD, Passing_INT)
+
+purdy2 <- purdy %>% summarize(sum(Rushing_ATT), sum(Rushing_YDS), sum(Rushing_TD),sum(Passing_YDS), sum(Passing_TD), sum(Passing_INT))
+
+team <- offClean %>% select(Name, Opponent_Opponent, Rushing_ATT, Rushing_YDS, Rushing_TD, Passing_YDS, Passing_TD, Passing_INT)
+
+team2 <- team %>% na.omit()%>%
+  summarize(sum(Rushing_ATT), sum(Rushing_YDS), sum(Rushing_TD), sum(Passing_YDS), sum(Passing_TD), sum(Passing_INT))
+
+together <- rbind(team2, purdy2) %>% summarize(Rushing_ATT = `sum(Rushing_ATT)`, Rushing_YDS = `sum(Rushing_YDS)`, 
+                                               Rushing_TD = `sum(Rushing_TD)`, Passing_YDS = `sum(Passing_YDS)`, 
+                                               Passing_TD = `sum(Passing_TD)`, Passing_INT = `sum(Passing_INT)`)
+together[2,]/together[1,]
+```  
+
+### 3)  
+To find which players made the biggest progress over the last year I compared the sums of the stats from 2020 to 2019. I only calculated the sums of stats that were positive towards the player. I took the sums from 2020 and subtracted the sums from 2019 to see the difference in the year. Positive values means that they improved in that stat. From the offense team (improvemento), Breece Hall made the most improvement as he had the largest increase in both Rushing_YDS and Rushing_TD.  From the offense team (improvementd), JaQuan Bailey and Jake Hummel made the most improvements and I looked at their increase in Tackles_Solo and Tackles_ASST.
+```{r, warning = FALSE}
+defense19 <- read_excel('C:/Users/esmyk/oneDrive/DS 202/cyclonesFootball2019.xlsx', sheet='Defensive')
+offense19 <- read_excel('C:/Users/esmyk/oneDrive/DS 202/cyclonesFootball2019.xlsx', sheet='Offensive')
+biography19 <- read_excel('C:/Users/esmyk/oneDrive/DS 202/cyclonesFootball2019.xlsx', sheet='Biography')
+defense19 <- defense19 %>%
+  mutate(across(Tackles_Solo:Pass_PB, as.numeric), Name = as.factor(Name), 
+         Opponent_Opponent = as.factor(Opponent_Opponent))
+
+offense19 <- offense19 %>%
+  mutate(across(Rushing_ATT:Passing_INT, as.numeric), Name = as.factor(Name), 
+         Opponent_Opponent = as.factor(Opponent_Opponent))
+
+data <- offense19 %>% group_by(Name) %>%
+  summarize(sum(Rushing_ATT), sum(Rushing_YDS), sum(Rushing_TD),
+            sum(Passing_YDS), sum(Passing_TD), sum(Passing_INT),
+            sum(Receiving_TD), sum(Receiving_YDS))
+data2 <- offClean %>% group_by(Name) %>%
+  summarize(sum(Rushing_ATT), sum(Rushing_YDS), sum(Rushing_TD),
+            sum(Passing_YDS), sum(Passing_TD), sum(Passing_INT), 
+            sum(Receiving_TD), sum(Receiving_YDS))
+tg <- inner_join(data, data2, by = 'Name')
+improvemento <- tg %>% group_by(Name) %>%
+  summarize(DiffR_YDS = `sum(Rushing_YDS).y` - `sum(Rushing_YDS).x`, DiffR_TD = `sum(Rushing_TD).y` - `sum(Rushing_TD).x`, 
+            DiffRE_TD = `sum(Receiving_TD).y`- `sum(Receiving_TD).x`, DiffRE_YDS = `sum(Receiving_YDS).y`- `sum(Receiving_YDS).x`, 
+            DiffP_YDS = `sum(Passing_YDS).y` - `sum(Passing_YDS).x`, DiffP_TD = `sum(Passing_TD).y` - `sum(Passing_TD).x`)
+            
+
+data3 <- defense19 %>% group_by(Name) %>%
+  summarize(sum(Tackles_Solo), sum(Tackles_ASST), sum(Tackles_TFL), sum(Tackles_Sack), sum(Turnover_FF), sum(Turnover_FR), 
+            sum(Turnover_INT), sum(Pass_QBH), sum(Pass_PB))
+data4 <- defClean %>% group_by(Name) %>%
+  summarize(sum(Tackles_Solo), sum(Tackles_ASST), sum(Tackles_TFL), sum(Tackles_Sack), sum(Turnover_FF), sum(Turnover_FR), 
+            sum(Turnover_INT), sum(Pass_QBH), sum(Pass_PB))
+tg2 <- inner_join(data3, data4, by = 'Name')
+improvementd <- tg2 %>% group_by(Name) %>%
+  summarize(DiffT_Solo = `sum(Tackles_Solo).y` - `sum(Tackles_Solo).x`, DiffT_ASST = `sum(Tackles_ASST).y` - `sum(Tackles_ASST).x`,
+            DiffT_Sack = `sum(Tackles_Sack).y` - `sum(Tackles_Sack).x`, DiffTu_FF = `sum(Turnover_FF).y` - `sum(Turnover_FF).x`, 
+            DiffTu_INT = `sum(Turnover_INT).y` - `sum(Turnover_INT).x`, DiffP_QBH = `sum(Pass_QBH).y` - `sum(Pass_QBH).x`)
+improvemento
+improvementd
+```
